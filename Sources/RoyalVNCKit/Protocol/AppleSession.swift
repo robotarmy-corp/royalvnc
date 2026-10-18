@@ -13,6 +13,10 @@
 // Written from docs/protocols/apple-auth-spec.md sections 6 to 8.
 //
 // ── Change log (newest first) ──────────────────────────────────────────────
+//  v1.2  2026-10-18  Live on mm2018: the block comes straight after ServerInit,
+//                    flagged there, and must be answered before ViewerInfo.
+//                    The Mac's answer is length-prefixed. Mask bit 2 offers
+//                    the own-session reply, which opened a new session.
 //  v1.1  2026-10-18  Answers the session-selection block (spec 6, approved
 //                    4304071 plus 8f81667): share-console and auto-login
 //                    replies, then a search for the rekey past the Mac's
@@ -46,50 +50,49 @@ extension VNCProtocol {
 		/// How long to wait for the person at the console to approve sharing.
 		static let approvalTimeout: TimeInterval = 90
 
-		/// Sends the two cleartext messages, answers any session selection,
+		/// Answers any session selection, sends the two cleartext messages,
 		/// reads the rekey and starts the encrypted record layer.
+		/// `selectionExpected` comes from ServerInit (see ServerInit.swift).
 		static func establish(connection: SessionConnection,
 							  wrapKey: [UInt8],
 							  credential: VNCUsernamePasswordCredential,
 							  chooser: Chooser,
+							  selectionExpected: Bool = false,
 							  logger: VNCLogger? = nil) async throws {
+			if selectionExpected {
+				// The block comes straight after ServerInit, and the Mac reads
+				// the client's next bytes as the answer. Answer it first.
+				let length = try await connection.readUInt16()
+
+				guard length == sessionSelectionLength else {
+					throw VNCError.protocol(.invalidData)
+				}
+
+				let block = [UInt8](try await connection.readBuffered(length: Int(length)))
+
+				try await answerSessionSelection(parseSessionSelection(block),
+												 connection: connection,
+												 wrapKey: wrapKey,
+												 credential: credential,
+												 chooser: chooser,
+												 logger: logger)
+			}
+
 			try await connection.write(data: Data(viewerInfo + setEncryptionStart))
 
 			var rekey = try await readRekey(connection: connection, logger: logger)
 
 			if case .sessionSelection(let request) = rekey {
-				let choice = await chooser(request)
+				// A Mac that sent the block without marking ServerInit. Kept
+				// for safety; the Mac has already read ViewerInfo as an answer.
+				try await answerSessionSelection(request,
+												 connection: connection,
+												 wrapKey: wrapKey,
+												 credential: credential,
+												 chooser: chooser,
+												 logger: logger)
 
-				logger?.logDebug("Apple session: session selection mask \(request.mask), choice \(choice)")
-
-				let reply: [UInt8]
-
-				switch choice {
-					case .shareConsole where request.canShareConsole:
-						reply = shareConsoleReply(consoleUserName: request.consoleUserName)
-					case .ownSession where request.canUseOwnSession:
-						reply = try ownSessionReply(credential: credential, wrapKey: wrapKey)
-					case .cancel:
-						throw VNCError.authentication(.appleSessionSelectionDeclined)
-					default:
-						throw VNCError.authentication(.appleSessionSelectionRequired)
-				}
-
-				try await connection.write(data: Data(reply))
-
-				// A person may have to approve. Give up after a while.
-				let watchdog = Task {
-					try await Task.sleep(nanoseconds: UInt64(approvalTimeout * 1_000_000_000))
-					connection.cancel()
-				}
-				defer { watchdog.cancel() }
-
-				do {
-					rekey = .rekey(try await searchForRekey(connection: connection, logger: logger))
-				} catch {
-					// The Mac closes the connection to decline.
-					throw VNCError.authentication(.appleSessionSelectionDeclined)
-				}
+				rekey = .rekey(try await searchForRekey(connection: connection, logger: logger))
 			}
 
 			guard case .rekey(let wrapped) = rekey else {
@@ -112,6 +115,52 @@ extension VNCProtocol {
 			connection.enableEncryption(codec)
 
 			logger?.logDebug("Apple session: encryption on")
+		}
+
+		/// Asks the app, sends the matching reply, and waits for the Mac's
+		/// answer. A person may have to approve, so this can take a while.
+		private static func answerSessionSelection(_ request: VNCSessionSelectionRequest,
+												   connection: SessionConnection,
+												   wrapKey: [UInt8],
+												   credential: VNCUsernamePasswordCredential,
+												   chooser: Chooser,
+												   logger: VNCLogger?) async throws {
+			let choice = await chooser(request)
+
+			logger?.logDebug("Apple session: session selection mask \(request.mask), choice \(choice)")
+
+			let reply: [UInt8]
+
+			switch choice {
+				case .shareConsole where request.canShareConsole:
+					reply = shareConsoleReply(consoleUserName: request.consoleUserName)
+				case .ownSession where request.canUseOwnSession:
+					reply = try ownSessionReply(credential: credential, wrapKey: wrapKey)
+				case .cancel:
+					throw VNCError.authentication(.appleSessionSelectionDeclined)
+				default:
+					throw VNCError.authentication(.appleSessionSelectionRequired)
+			}
+
+			try await connection.write(data: Data(reply))
+
+			let watchdog = Task {
+				try await Task.sleep(nanoseconds: UInt64(approvalTimeout * 1_000_000_000))
+				connection.cancel()
+			}
+			defer { watchdog.cancel() }
+
+			do {
+				// Seen on mm2018 for the own-session reply: a 2-byte length (80),
+				// then the body, starting with version 1. Its meaning is not known.
+				let length = Int(try await connection.readUInt16())
+				let answer = [UInt8](try await connection.readBuffered(length: length))
+
+				logger?.logDebug("Apple session: session-selection answer, \(length) bytes, starts \(answer.prefix(4).map { String(format: "%02x", $0) }.joined())")
+			} catch {
+				// The Mac closes the connection to decline.
+				throw VNCError.authentication(.appleSessionSelectionDeclined)
+			}
 		}
 
 		private enum FirstReply {
@@ -206,8 +255,10 @@ extension VNCProtocol {
 			let mask = block[2..<6].reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
 			let nameBytes = block[10..<74].prefix { $0 != 0 }
 
+			// Bit 0: share the console. Bit 1 (spec) or bit 2 (seen on mm2018,
+			// mask 5, which accepted the own-session reply): own session.
 			return VNCSessionSelectionRequest(canShareConsole: mask & 0x1 != 0,
-											  canUseOwnSession: mask & 0x2 != 0,
+											  canUseOwnSession: mask & 0x6 != 0,
 											  consoleUserName: String(decoding: nameBytes, as: UTF8.self),
 											  mask: mask)
 		}

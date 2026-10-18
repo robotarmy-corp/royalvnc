@@ -6,6 +6,8 @@
 // script sends a few arbitrary bytes there, which the client must skip.
 //
 // ── Change log (newest first) ──────────────────────────────────────────────
+//  v1.1  2026-10-18  The block answered before ViewerInfo when ServerInit
+//                    flags it, and the Mac's length-prefixed answer.
 //  v1.0  2026-10-18  New. Plain rekey, share-console, own session, cancel.
 // ───────────────────────────────────────────────────────────────────────────
 
@@ -63,11 +65,13 @@ final class AppleSessionTests: XCTestCase {
 
 	/// Runs establish() against the script and checks the session works after.
 	private func establish(socket: ScriptedSocket,
+						   selectionExpected: Bool = false,
 						   chooser: @escaping AppleChooser) async throws -> SessionConnection {
 		let connection = SessionConnection(wrapping: socket)
 
 		try await VNCProtocol.AppleSession.establish(connection: connection, wrapKey: wrapKey,
-													 credential: credential, chooser: chooser)
+													 credential: credential, chooser: chooser,
+													 selectionExpected: selectionExpected)
 		XCTAssertTrue(connection.isEncrypted)
 
 		// The client's next message is a record the Mac can open.
@@ -106,7 +110,7 @@ final class AppleSessionTests: XCTestCase {
 		let update = try rekeyUpdate()
 		socket.onWrite = { data in
 			switch data.count {
-				case 78: socket.inbound += self.selectionBlock(mask: 5, name: "Test User")
+				case 78: socket.inbound += self.selectionBlock(mask: 1, name: "Test User")
 				case 74:
 					XCTAssertEqual(Array(data.prefix(10)), [0, 72, 0, 2, 0, 0, 0, 0, 0, 0])
 					XCTAssertEqual(Array(data[10..<19]), Array("Test User".utf8))
@@ -119,7 +123,7 @@ final class AppleSessionTests: XCTestCase {
 		var seen: VNCSessionSelectionRequest?
 		_ = try await establish(socket: socket) { request in seen = request; return .shareConsole }
 
-		XCTAssertEqual(seen?.mask, 5)
+		XCTAssertEqual(seen?.mask, 1)
 		XCTAssertEqual(seen?.canShareConsole, true)
 		XCTAssertEqual(seen?.canUseOwnSession, false)
 		XCTAssertEqual(seen?.consoleUserName, "Test User")
@@ -140,7 +144,7 @@ final class AppleSessionTests: XCTestCase {
 					let password = try ecb.decrypt(Array(data[138..<202]))
 					XCTAssertEqual(Array(user.prefix(5)), Array("mike".utf8) + [0])
 					XCTAssertEqual(Array(password.prefix(7)), Array("secret".utf8) + [0])
-					socket.inbound += [9, 9] + update
+					socket.inbound += [0, 2, 9, 9] + update
 				default: break
 			}
 		}
@@ -148,8 +152,35 @@ final class AppleSessionTests: XCTestCase {
 		_ = try await establish(socket: socket) { $0.defaultChoice }
 	}
 
+	/// The order mm2018 uses: block straight after ServerInit, answer, the
+	/// Mac's length-prefixed answer, then ViewerInfo and the rekey.
+	func testSelectionFlaggedInServerInit() async throws {
+		let socket = ScriptedSocket()
+		let update = try rekeyUpdate()
+		socket.inbound = selectionBlock(mask: 5, name: "Test User")
+		var order: [Int] = []
+		socket.onWrite = { data in
+			order.append(data.count)
+			switch data.count {
+				case 202:
+					XCTAssertEqual(Array(data.prefix(10)), [0, 200, 0, 2, 0, 0, 0, 0, 2, 0])
+					socket.inbound += [0, 80, 0, 1] + [UInt8](repeating: 0, count: 78)
+				case 78:
+					socket.inbound += update
+				default: break
+			}
+		}
+
+		var seen: VNCSessionSelectionRequest?
+		_ = try await establish(socket: socket, selectionExpected: true) { request in seen = request; return request.defaultChoice }
+
+		XCTAssertEqual(order.prefix(3), [202, 78, 8]) // answer, ViewerInfo + command 1, command 2
+		XCTAssertEqual(seen?.canUseOwnSession, true) // bit 2
+		XCTAssertEqual(seen?.defaultChoice, .ownSession)
+	}
+
 	func testCancelAndUnofferedChoice() async throws {
-		for (choice, mask) in [(VNCSessionSelectionChoice.cancel, UInt8(5)), (.ownSession, 5)] {
+		for (choice, mask) in [(VNCSessionSelectionChoice.cancel, UInt8(5)), (.ownSession, 1)] {
 			let socket = ScriptedSocket()
 			socket.onWrite = { data in
 				if data.count == 78 { socket.inbound += self.selectionBlock(mask: mask, name: "x") }

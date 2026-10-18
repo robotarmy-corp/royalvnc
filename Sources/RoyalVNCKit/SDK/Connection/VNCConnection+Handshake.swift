@@ -1,6 +1,12 @@
 // The RFB handshake: version, security type choice, authentication.
 //
 // ── Change log (newest first, robotarmy-corp fork) ─────────────────────────
+//  v1.4  2026-10-18  With settings.appleSessionSelection, answers an Apple
+//                    server's "RFB 003.889" with the same banner (spec 1). Live on mm2018,
+//                    a 3.8 answer kept the Mac from offering session
+//                    selection; Apple's own client answers 3.889. Reads
+//                    ServerInit's flag for a following session-selection
+//                    block and passes it to the session setup.
 //  v1.3  2026-10-18  Passes the login and the app's session-selection
 //                    handler to the Apple session setup.
 //  v1.2  2026-10-18  Apple SRP logins (types 33 and 36). They send the selector
@@ -49,7 +55,11 @@ private extension VNCConnection {
 			let maxSupportedProtocolVersion = maxSupportedProtocolVersion
 
 			// The max. protocol version we currently support is 3.8, so check if the server is within those limits, otherwise downgrade to 3.8
-			if serverProtocolVersion.majorVersion <= maxSupportedProtocolVersion.majorVersion,
+			if serverProtocolVersion.isAppleRemoteDesktop, settings.appleSessionSelection {
+				// Apple's Screen Sharing: echo its banner. Apple's extensions,
+				// session selection among them, depend on it.
+				clientProtocolVersion = serverProtocolVersion
+			} else if serverProtocolVersion.majorVersion <= maxSupportedProtocolVersion.majorVersion,
 			   serverProtocolVersion.minorVersion <= maxSupportedProtocolVersion.minorVersion {
 				// Server reported a protocol version equal or lower to 3.8, use it
 				clientProtocolVersion = serverProtocolVersion
@@ -329,6 +339,11 @@ private extension VNCConnection {
 			// Everything after this point travels in encrypted records.
 			let handler = sessionSelectionHandler
 
+			// Observed on mm2018: bit 0x04 of byte 5 of the name field is set
+			// when a session-selection block follows ServerInit.
+			let field = serverInit.appleNameField
+			let selectionExpected = field.count > 5 && field[5] & 0x04 != 0
+
 			try await VNCProtocol.AppleSession.establish(connection: connection,
 														 wrapKey: appleWrapKey,
 														 credential: appleCredential ?? VNCUsernamePasswordCredential(username: "", password: ""),
@@ -339,6 +354,7 @@ private extension VNCConnection {
 					handler(request) { continuation.resume(returning: $0) }
 				}
 			},
+														 selectionExpected: selectionExpected,
 														 logger: logger)
 			appleCredential = nil
 		}

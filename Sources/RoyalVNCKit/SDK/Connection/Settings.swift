@@ -1,6 +1,10 @@
 // Connection settings for a VNCConnection.
 //
 // ── Change log (newest first, robotarmy-corp fork) ─────────────────────────
+//  v1.2  2026-10-18  appleSessionSelection: opt in to the Mac's "share the
+//                    console or open your own session" question. Off by
+//                    default, because the own-session answer opens a session
+//                    whose picture stays black (2026-10-18, mm2018).
 //  v1.1  2026-10-17  preferredSecurityTypes: lets the app pick the login
 //                    method (e.g. VNC password vs Mac account) instead of the
 //                    library's fixed order. Empty keeps the old behaviour.
@@ -68,6 +72,13 @@ public extension VNCConnection {
 		/// RFB security type numbers to try, in order. The first one the server
 		/// offers and this library supports is used. Empty means the default order.
 		public var preferredSecurityTypes: [UInt8] = []
+
+		/// Apple Macs only. When true, the client answers with Apple's own
+		/// protocol banner, and the Mac may ask whether to share the console
+		/// user's screen or open a session of the login account's own (see
+		/// VNCConnection.sessionSelectionHandler). When false, the Mac picks
+		/// for itself, which on mm2018 meant the account's own session.
+		public var appleSessionSelection = false
 
 #if canImport(ObjectiveC)
 		@objc(frameEncodings)
