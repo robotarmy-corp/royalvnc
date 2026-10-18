@@ -14,6 +14,8 @@
 //   LIVE_LOGOUT    if set, logs the account out: Shift-Command-Q after 2 s,
 //                  Return after 5 s. Use only with throwaway accounts.
 //   LIVE_CLICK     "x,y" in framebuffer pixels: one left click after 2 s
+//   LIVE_CHOICE    answer to a session-selection question: cancel, share,
+//                  own, or default (the library's pick). Default: default.
 //   LIVE_SNAPSHOT  path of a PNG to write with the last frame, quarter size
 //
 // Prints the connection states, the desktop size, how many framebuffer
@@ -21,6 +23,9 @@
 // credentials and no console user's name.
 //
 // ── Change log (newest first) ──────────────────────────────────────────────
+//  v1.5  2026-10-18  LIVE_CHOICE answers a session-selection question and
+//                    prints what the Mac offered. LIVE_DEBUG prints the
+//                    library's own log to stdout.
 //  v1.4  2026-10-18  LIVE_CLICK, to check pointer input on its own.
 //  v1.3  2026-10-18  LIVE_LOGOUT, to clear a test account's session so the
 //                    next login meets the session-selection block.
@@ -128,7 +133,21 @@ let settings = VNCConnection.Settings(isDebugLoggingEnabled: environment["LIVE_D
 settings.preferredSecurityTypes = [type]
 
 let delegate = Delegate(user: user, password: password)
-let connection = VNCConnection(settings: settings)
+let connection = environment["LIVE_DEBUG"] != nil
+	? VNCConnection(settings: settings, logger: VNCPrintLogger())
+	: VNCConnection(settings: settings)
+
+let choiceName = environment["LIVE_CHOICE"] ?? "default"
+connection.sessionSelectionHandler = { request, completion in
+	// The console user's name is personal data: print only its length.
+	print("session selection: mask=\(request.mask) share=\(request.canShareConsole) own=\(request.canUseOwnSession) nameLength=\(request.consoleUserName.utf8.count) answer=\(choiceName)")
+	switch choiceName {
+		case "cancel": completion(.cancel)
+		case "share": completion(.shareConsole)
+		case "own": completion(.ownSession)
+		default: completion(request.defaultChoice)
+	}
+}
 connection.delegate = delegate
 
 print("connecting to \(host):\(port) with type \(type) as \(user)")
