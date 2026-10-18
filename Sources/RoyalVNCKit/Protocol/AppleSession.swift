@@ -13,6 +13,11 @@
 // Written from docs/protocols/apple-auth-spec.md sections 6 to 8.
 //
 // ── Change log (newest first) ──────────────────────────────────────────────
+//  v1.3  2026-10-18  Share-console, live on mm2018: approval worked, but
+//                    unknown bytes came before the rekey, so the client now
+//                    scans for the rekey after a selection. The reply's name
+//                    is shown to the console user as the requester, so it
+//                    carries the login account's name.
 //  v1.2  2026-10-18  Live on mm2018: the block comes straight after ServerInit,
 //                    flagged there, and must be answered before ViewerInfo.
 //                    The Mac's answer is length-prefixed. Mask bit 2 offers
@@ -80,7 +85,11 @@ extension VNCProtocol {
 
 			try await connection.write(data: Data(viewerInfo + setEncryptionStart))
 
-			var rekey = try await readRekey(connection: connection, logger: logger)
+			// After a share-console approval, mm2018 sent bytes of unknown
+			// layout before the rekey. Scan past them to the rekey rectangle.
+			var rekey: FirstReply = selectionExpected
+				? .rekey(try await searchForRekey(connection: connection, logger: logger))
+				: try await readRekey(connection: connection, logger: logger)
 
 			if case .sessionSelection(let request) = rekey {
 				// A Mac that sent the block without marking ServerInit. Kept
@@ -133,7 +142,9 @@ extension VNCProtocol {
 
 			switch choice {
 				case .shareConsole where request.canShareConsole:
-					reply = shareConsoleReply(consoleUserName: request.consoleUserName)
+					// The Mac shows this name to the person at the console as
+					// the one asking (seen on mm2018), so send the login account.
+					reply = shareConsoleReply(requesterName: credential.username)
 				case .ownSession where request.canUseOwnSession:
 					reply = try ownSessionReply(credential: credential, wrapKey: wrapKey)
 				case .cancel:
@@ -238,7 +249,7 @@ extension VNCProtocol {
 
 				if window == signature {
 					// What came before the update header (4 bytes) was the Mac's answer.
-					logger?.logDebug("Apple session: \(max(0, skipped - 4)) bytes of session-selection answer before the rekey")
+					logger?.logDebug("Apple session: skipped \(max(0, skipped - 4)) bytes before the rekey")
 
 					let body = [UInt8](try await connection.readBuffered(length: 36))
 
@@ -264,10 +275,12 @@ extension VNCProtocol {
 		}
 
 		/// Share-console reply: length 72, version 2, four zeros, command 0,
-		/// a zero, then the console user's name, NUL-padded.
-		private static func shareConsoleReply(consoleUserName: String) -> [UInt8] {
+		/// a zero, then a name, NUL-padded. The spec says the console user's
+		/// name; mm2018 displays it as the requester's, so we send the login
+		/// account's.
+		private static func shareConsoleReply(requesterName: String) -> [UInt8] {
 			var body: [UInt8] = [0x00, 0x02, 0, 0, 0, 0, 0x00, 0x00]
-			body += Array(Array(consoleUserName.utf8).prefix(63))
+			body += Array(Array(requesterName.utf8).prefix(63))
 			body += [UInt8](repeating: 0, count: 72 - body.count)
 
 			return [0x00, 72] + body

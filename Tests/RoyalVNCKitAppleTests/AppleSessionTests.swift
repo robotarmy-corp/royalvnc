@@ -6,6 +6,8 @@
 // script sends a few arbitrary bytes there, which the client must skip.
 //
 // ── Change log (newest first) ──────────────────────────────────────────────
+//  v1.2  2026-10-18  Share-console sends the requester's name; unknown bytes
+//                    before the rekey after a selection are skipped.
 //  v1.1  2026-10-18  The block answered before ViewerInfo when ServerInit
 //                    flags it, and the Mac's length-prefixed answer.
 //  v1.0  2026-10-18  New. Plain rekey, share-console, own session, cancel.
@@ -113,8 +115,9 @@ final class AppleSessionTests: XCTestCase {
 				case 78: socket.inbound += self.selectionBlock(mask: 1, name: "Test User")
 				case 74:
 					XCTAssertEqual(Array(data.prefix(10)), [0, 72, 0, 2, 0, 0, 0, 0, 0, 0])
-					XCTAssertEqual(Array(data[10..<19]), Array("Test User".utf8))
-					XCTAssertEqual(Array(data[19...]), [UInt8](repeating: 0, count: 55))
+					// The requester's name, not the console user's (mm2018 shows it as the asker).
+					XCTAssertEqual(Array(data[10..<14]), Array("mike".utf8))
+					XCTAssertEqual(Array(data[14...]), [UInt8](repeating: 0, count: 60))
 					socket.inbound += [0, 4, 1, 2, 3, 4] + update // unknown answer, then rekey
 				default: break
 			}
@@ -177,6 +180,23 @@ final class AppleSessionTests: XCTestCase {
 		XCTAssertEqual(order.prefix(3), [202, 78, 8]) // answer, ViewerInfo + command 1, command 2
 		XCTAssertEqual(seen?.canUseOwnSession, true) // bit 2
 		XCTAssertEqual(seen?.defaultChoice, .ownSession)
+	}
+
+	/// Share-console in mm2018's order, with unknown bytes (starting 02, as
+	/// seen live) between the Mac's answer and the rekey.
+	func testShareConsoleFlaggedWithBytesBeforeRekey() async throws {
+		let socket = ScriptedSocket()
+		let update = try rekeyUpdate()
+		socket.inbound = selectionBlock(mask: 5, name: "Test User")
+		socket.onWrite = { data in
+			switch data.count {
+				case 74: socket.inbound += [0, 4, 0, 1, 0, 0]
+				case 78: socket.inbound += [2, 0, 0, 7, 1, 2, 3, 4, 5, 6, 7] + update
+				default: break
+			}
+		}
+
+		_ = try await establish(socket: socket, selectionExpected: true) { _ in .shareConsole }
 	}
 
 	func testCancelAndUnofferedChoice() async throws {
