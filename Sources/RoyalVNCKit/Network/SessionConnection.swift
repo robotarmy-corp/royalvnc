@@ -9,6 +9,7 @@
 // in the order they are sealed, so two concurrent writers could reorder them.
 //
 // ── Change log (newest first) ──────────────────────────────────────────────
+//  v1.1  2026-10-18  rekey(): passes a mid-session rekey to the codec.
 //  v1.0  2026-10-18  New. Pass-through connection with an optional Apple
 //                    record codec switched on after the rekey.
 // ───────────────────────────────────────────────────────────────────────────
@@ -53,6 +54,13 @@ final class SessionConnection: NetworkConnection {
 	}
 
 	var isEncrypted: Bool { codec != nil }
+
+	/// A rekey that arrived inside the encrypted session.
+	func rekey(wrappedKey: [UInt8], wrappedVector: [UInt8]) throws {
+		guard let codec else { throw AppleRecordError.invalidRekey }
+
+		try codec.rekey(wrappedKey: wrappedKey, wrappedVector: wrappedVector)
+	}
 
 	// MARK: NetworkConnection
 	var status: NetworkConnectionStatus { inner.status }

@@ -6,6 +6,7 @@
 // Mac agrees: the live test (AppleLoginLiveTest) does that.
 //
 // ── Change log (newest first) ──────────────────────────────────────────────
+//  v1.1  2026-10-18  Mid-session rekey keeps both ends in step.
 //  v1.0  2026-10-18  New. PBKDF2 vectors, RSA against the system, SRP round
 //                    trip, both login framings with good, bad and refused
 //                    passwords, record codec, and the rekey.
@@ -403,6 +404,26 @@ final class AppleRecordCodecTests: XCTestCase {
 		XCTAssertThrowsError(try AppleRecordCodec(key: key, initialVector: vector).open(flipped))
 
 		XCTAssertThrowsError(try AppleRecordCodec(key: key, initialVector: vector).open([1, 2, 3]))
+	}
+
+	func testMidSessionRekeyKeepsBothEndsInStep() throws {
+		let sender = AppleRecordCodec(key: key, initialVector: vector)
+		let receiver = AppleRecordCodec(key: key, initialVector: vector)
+		_ = try receiver.open(Array(try sender.seal([1])[2...]))
+
+		// New values wrapped under the current session key.
+		let ecb = try AES(key: key, blockMode: ECB(), padding: .noPadding)
+		let newKey = [UInt8](repeating: 3, count: 16), newVector = [UInt8](repeating: 4, count: 16)
+		for codec in [sender, receiver] {
+			try codec.rekey(wrappedKey: try ecb.encrypt(newKey), wrappedVector: try ecb.encrypt(newVector))
+		}
+
+		let record = try sender.seal([7, 7])
+		XCTAssertEqual(try receiver.open(Array(record[2...])), [7, 7])
+
+		// The new key and vector really are in use, and the counter kept running (1).
+		let plain = try AES(key: newKey, blockMode: CBC(iv: newVector), padding: .noPadding).decrypt(Array(record[2...]))
+		XCTAssertEqual(Array(plain.suffix(20)), Digest.sha1([0, 0, 0, 1] + plain.dropLast(20)))
 	}
 
 	func testRekeyUnwrapsKeyAndVector() throws {

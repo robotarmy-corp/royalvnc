@@ -1,6 +1,8 @@
 // The connection object: settings, state, handshake entry point.
 //
 // ── Change log (newest first, robotarmy-corp fork) ─────────────────────────
+//  v1.3  2026-10-18  Parses Apple's mid-session rekey (1103) and skips its
+//                    1010 and 1011 rectangles.
 //  v1.2  2026-10-18  sessionSelectionHandler: the app's answer when a Mac
 //                    offers "share the console" or "own session".
 //  v1.1  2026-10-18  `connection` is now a SessionConnection, a pass-through
@@ -133,7 +135,12 @@ public final class VNCConnection: NSObjectOrAnyObject {
 			VNCPseudoEncodingType.desktopName.rawValue: VNCProtocol.DesktopNameEncoding(),
 			VNCPseudoEncodingType.cursor.rawValue: VNCProtocol.CursorEncoding(),
 			compressionLevelEncodingType: compressionLevelEncoding,
-			jpegQualityLevelEncodingType: jpegQualityLevelEncoding
+			jpegQualityLevelEncodingType: jpegQualityLevelEncoding,
+
+			// Apple encrypted session (types 33 and 36). Parsed, never requested.
+			VNCProtocol.AppleRekeyEncoding.number: VNCProtocol.AppleRekeyEncoding(),
+			1010: VNCProtocol.AppleSkippedEncoding(encodingType: 1010),
+			1011: VNCProtocol.AppleSkippedEncoding(encodingType: 1011)
 		]
 
 		// Sanity Check

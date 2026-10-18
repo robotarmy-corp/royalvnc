@@ -11,6 +11,9 @@
 // Written from docs/protocols/apple-auth-spec.md sections 8 and 9.
 //
 // ── Change log (newest first) ──────────────────────────────────────────────
+//  v1.1  2026-10-18  rekey(): a later rekey, unwrapped under the current
+//                    session key, replaces the key and both chains. The spec
+//                    marks this unverified. Counters keep running.
 //  v1.0  2026-10-18  New. Seal and open records, strict sequence numbers,
 //                    and unwrapping of the session key from the rekey.
 // ───────────────────────────────────────────────────────────────────────────
@@ -39,7 +42,7 @@ final class AppleRecordCodec {
 	/// and the plaintext is padded up to a whole number of blocks.
 	static let maximumBodyLength = 65_535 / blockLength * blockLength - 2 - checkLength
 
-	private let key: [UInt8]
+	private var key: [UInt8]
 
 	private let sendLock = NSLock()
 	private var sendVector: [UInt8]
@@ -74,6 +77,19 @@ final class AppleRecordCodec {
 		} catch {
 			throw AppleRecordError.invalidRekey
 		}
+	}
+
+	/// A rekey during the session. Per the spec (unverified) the new values
+	/// are wrapped under the current session key and replace it.
+	func rekey(wrappedKey: [UInt8], wrappedVector: [UInt8]) throws {
+		sendLock.lock()
+		defer { sendLock.unlock() }
+
+		let next = try Self.fromRekey(wrapKey: key, wrappedKey: wrappedKey, wrappedVector: wrappedVector)
+
+		key = next.key
+		sendVector = next.sendVector
+		receiveVector = next.receiveVector
 	}
 
 	/// Wraps one message body in a record, ready to put on the wire.
