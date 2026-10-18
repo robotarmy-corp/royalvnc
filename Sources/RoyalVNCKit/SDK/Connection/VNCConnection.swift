@@ -1,3 +1,12 @@
+// The connection object: settings, state, handshake entry point.
+//
+// ── Change log (newest first, robotarmy-corp fork) ─────────────────────────
+//  v1.1  2026-10-18  `connection` is now a SessionConnection, a pass-through
+//                    wrapper that can switch on Apple's encrypted records
+//                    (login types 33 and 36).
+//  v1.0  (upstream)  As inherited from royalapplications/royalvnc 2026-09-21.
+// ───────────────────────────────────────────────────────────────────────────
+
 #if canImport(FoundationEssentials)
 import FoundationEssentials
 #else
@@ -70,17 +79,14 @@ public final class VNCConnection: NSObjectOrAnyObject {
 
     var mouseButtonState: VNCProtocol.MousePointerButton = [ ]
 
-    lazy var connection: some NetworkConnection = {
+    lazy var connection: SessionConnection = {
         let connectionSettings = NetworkConnectionSettings(connectionTimeout: 15,
                                                            host: settings.hostname,
                                                            port: settings.port)
 
-        // NOTE: To test SocketNetworkConnection on Darwin (macOS, iOS, etc.), comment out the the #if
-#if canImport(Network)
-        let connection = NWConnection(settings: connectionSettings)
-#else
-		let connection = SocketNetworkConnection(settings: connectionSettings)
-#endif
+        // SessionConnection wraps NWConnection (or SocketNetworkConnection where
+        // Network is missing) and adds Apple's encrypted records once switched on.
+        let connection = SessionConnection(settings: connectionSettings)
 
         connection.setStatusUpdateHandler(connectionStatusDidChange)
 

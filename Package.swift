@@ -1,5 +1,12 @@
 // swift-tools-version: 6.0
 
+// ── Change log (newest first, robotarmy-corp fork) ─────────────────────────
+//  v1.1  2026-10-18  Added the AppleLoginLiveTest executable and the
+//                    RoyalVNCKitAppleTests test target, for Apple login
+//                    types 33 and 36.
+//  v1.0  (upstream)  As inherited from royalapplications/royalvnc 2026-09-21.
+// ───────────────────────────────────────────────────────────────────────────
+
 import PackageDescription
 
 let swiftLanguageMode = SwiftLanguageMode.v5
@@ -85,6 +92,17 @@ let package = Package(
 
         .executableTarget(
             name: "RoyalVNCKitDemo",
+            dependencies: [ "RoyalVNCKit" ]
+        ),
+
+        // Live check of Apple's SRP logins (types 33 and 36). Fork addition.
+        .executableTarget(
+            name: "AppleLoginLiveTest",
+            dependencies: [ "RoyalVNCKit" ]
+        ),
+
+        .testTarget(
+            name: "RoyalVNCKitAppleTests",
             dependencies: [ "RoyalVNCKit" ]
         ),
 

@@ -1,3 +1,13 @@
+// Authentication errors.
+//
+// ── Change log (newest first, robotarmy-corp fork) ─────────────────────────
+//  v1.1  2026-10-18  Cases for Apple's SRP login (types 33 and 36): wrong
+//                    password, a correct password the Mac still refuses, a
+//                    server proof that does not check out, and the session
+//                    prompt shown when another account is at the console.
+//  v1.0  (upstream)  As inherited from royalapplications/royalvnc 2026-09-21.
+// ───────────────────────────────────────────────────────────────────────────
+
 #if canImport(FoundationEssentials)
 import FoundationEssentials
 #else
@@ -13,6 +23,10 @@ public extension VNCError {
 		case ardAuthenticationFailed
 		case ultraVNCMSLogonIIAuthenticationFailed
 		case encryptionFailed
+		case appleLoginFailed
+		case appleLoginRefused
+		case appleServerProofInvalid
+		case appleSessionSelectionRequired
 
 		// MARK: - LocalizedError
 		public var errorDescription: String? {
@@ -34,6 +48,14 @@ public extension VNCError {
 					return "UltraVNC MS-Logon II authentication failed."
 				case .encryptionFailed:
 					return "Encryption failed."
+				case .appleLoginFailed:
+					return "The Mac did not accept the user name or password."
+				case .appleLoginRefused:
+					return "The password is right, but the Mac refused this account. It may not be allowed to use Screen Sharing."
+				case .appleServerProofInvalid:
+					return "The Mac's answer did not prove it knows the password. Not connecting."
+				case .appleSessionSelectionRequired:
+					return "Another account is signed in at the Mac. Choosing a session is not supported yet."
 			}
 		}
 	}

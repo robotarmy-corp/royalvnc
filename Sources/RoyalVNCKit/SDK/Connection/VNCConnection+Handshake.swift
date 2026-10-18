@@ -1,6 +1,9 @@
 // The RFB handshake: version, security type choice, authentication.
 //
 // ── Change log (newest first, robotarmy-corp fork) ─────────────────────────
+//  v1.2  2026-10-18  Apple SRP logins (types 33 and 36). They send the selector
+//                    together with their first message, send ClientInit 0xC1,
+//                    and switch on the encrypted session before SetPixelFormat.
 //  v1.1  2026-10-17  decideSecurityType honours settings.preferredSecurityTypes
 //                    before falling back to the built-in order.
 //  v1.0  (upstream)  As inherited from royalapplications/royalvnc 2026-09-21.
@@ -112,7 +115,7 @@ private extension VNCConnection {
 		let supportedSecurityTypes = supportedTypes.securityTypes
 
 		// The types this library can actually authenticate with.
-		let implemented: [VNCProtocol.SecurityType] = [.none, .diffieHellman, .ultraVNCMSLogonII, .vnc, .tight]
+		let implemented: [VNCProtocol.SecurityType] = [.none, .diffieHellman, .ultraVNCMSLogonII, .vnc, .tight, .apple33, .apple36]
 
 		let preferred = settings.preferredSecurityTypes
 			.compactMap { VNCProtocol.SecurityType(rawValue: $0) }
@@ -146,6 +149,13 @@ private extension VNCConnection {
 	}
 
 	func sendAuthenticationData(securityType: VNCProtocol.SecurityType) async throws {
+		// Apple's SRP logins send the selector in the same write as their first message.
+		if securityType == .apple33 || securityType == .apple36 {
+			try await performAppleSRPAuthentication(securityType: securityType)
+
+			return
+		}
+
 		do {
 			try await VNCProtocol.SecurityTypes.send(connection: connection,
 													 securityType: securityType.rawValue)
@@ -192,6 +202,30 @@ private extension VNCConnection {
 		}
 
 		try await sendClientInit()
+	}
+
+	func performAppleSRPAuthentication(securityType: VNCProtocol.SecurityType) async throws {
+		let variant: VNCProtocol.AppleSRPVariant = securityType == .apple33 ? .rsaWrapped : .cleartext
+
+		logger.logDebug("Using Security Type: \(securityType)")
+
+		let credential = try await askDelegateForUsernamePasswordCredential(authenticationType: .appleRemoteDesktop)
+
+		let outcome: VNCProtocol.AppleSRPAuthentication.Outcome
+
+		do {
+			outcome = try await VNCProtocol.AppleSRPAuthentication(variant: variant)
+				.perform(connection: connection, credential: credential, logger: logger)
+		} catch let error as VNCError {
+			throw error
+		} catch {
+			throw VNCError.ConnectionError.closedDuringHandshake(handshakingPhase: "Apple SRP Login",
+																 underlyingError: error)
+		}
+
+		logger.logDebug("Apple SRP login succeeded")
+
+		try await sendClientInit(appleWrapKey: outcome.wrapKey)
 	}
 
 	func performVNCAuthentication() async throws {
@@ -252,12 +286,17 @@ private extension VNCConnection {
 		}
 	}
 
-	func sendClientInit() async throws {
+	func sendClientInit(appleWrapKey: [UInt8]? = nil) async throws {
 		let isShared = settings.isShared
 
 		do {
-			try await VNCProtocol.ClientInit.send(connection: connection,
-												  isShared: isShared)
+			if appleWrapKey != nil {
+				// Apple's viewer sends 0xC1: the shared flag plus its own flags.
+				try await connection.write(value: 0xC1)
+			} else {
+				try await VNCProtocol.ClientInit.send(connection: connection,
+													  isShared: isShared)
+			}
 		} catch {
 			throw VNCError.ConnectionError.closedDuringHandshake(handshakingPhase: "Send Client Init",
 																 underlyingError: error)
@@ -265,21 +304,29 @@ private extension VNCConnection {
 
 		logger.logDebug("Sent Client Init")
 
-		try await receiveServerInit()
+		try await receiveServerInit(appleWrapKey: appleWrapKey)
 	}
 
-	func receiveServerInit() async throws {
+	func receiveServerInit(appleWrapKey: [UInt8]? = nil) async throws {
 		let serverInit: VNCProtocol.ServerInit
 
 		do {
 			serverInit = try await VNCProtocol.ServerInit.receive(connection: connection,
-																  isTightSecurityEnabled: state.isTightSecurityEnabled)
+																  isTightSecurityEnabled: state.isTightSecurityEnabled,
+																  lenientName: appleWrapKey != nil)
 		} catch {
 			throw VNCError.ConnectionError.closedDuringHandshake(handshakingPhase: "Receive Server Init",
 																 underlyingError: error)
 		}
 
 		logger.logDebug("Received Server Init \(serverInit)")
+
+		if let appleWrapKey {
+			// Everything after this point travels in encrypted records.
+			try await VNCProtocol.AppleSession.establish(connection: connection,
+														 wrapKey: appleWrapKey,
+														 logger: logger)
+		}
 
 		state.framebufferWidth = serverInit.framebufferWidth
 		state.framebufferHeight = serverInit.framebufferHeight
