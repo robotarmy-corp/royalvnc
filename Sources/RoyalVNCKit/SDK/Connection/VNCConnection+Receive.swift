@@ -1,3 +1,13 @@
+// The receive loop: reads server messages and dispatches them.
+//
+// ── Change log (newest first, robotarmy-corp fork) ─────────────────────────
+//  v1.1  2026-10-18  In an Apple encrypted session, skip the Mac's 8-byte
+//                    status message (type 0x14). It arrives every few seconds
+//                    and would otherwise end the connection as an unknown
+//                    message.
+//  v1.0  (upstream)  As inherited from royalapplications/royalvnc 2026-09-21.
+// ───────────────────────────────────────────────────────────────────────────
+
 #if canImport(FoundationEssentials)
 import FoundationEssentials
 #else
@@ -54,6 +64,10 @@ private extension VNCConnection {
 
 			case VNCProtocol.EndOfContinuousUpdates.messageType:
 				try await handleEndOfContinuousUpdatesMessage()
+
+			case 0x14 where connection.isEncrypted:
+				// Apple status message: type byte already read, 7 bytes remain.
+				try await connection.readPadding(length: 7)
 
 			default:
 				throw VNCError.protocol(.unsupportedServerToClientMessage(messageType: messageType))
