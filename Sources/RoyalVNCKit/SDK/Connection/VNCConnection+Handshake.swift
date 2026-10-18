@@ -1,6 +1,8 @@
 // The RFB handshake: version, security type choice, authentication.
 //
 // ── Change log (newest first, robotarmy-corp fork) ─────────────────────────
+//  v1.3  2026-10-18  Passes the login and the app's session-selection
+//                    handler to the Apple session setup.
 //  v1.2  2026-10-18  Apple SRP logins (types 33 and 36). They send the selector
 //                    together with their first message, send ClientInit 0xC1,
 //                    and switch on the encrypted session before SetPixelFormat.
@@ -225,6 +227,8 @@ private extension VNCConnection {
 
 		logger.logDebug("Apple SRP login succeeded")
 
+		appleCredential = credential
+
 		try await sendClientInit(appleWrapKey: outcome.wrapKey)
 	}
 
@@ -323,9 +327,20 @@ private extension VNCConnection {
 
 		if let appleWrapKey {
 			// Everything after this point travels in encrypted records.
+			let handler = sessionSelectionHandler
+
 			try await VNCProtocol.AppleSession.establish(connection: connection,
 														 wrapKey: appleWrapKey,
+														 credential: appleCredential ?? VNCUsernamePasswordCredential(username: "", password: ""),
+														 chooser: { request in
+				guard let handler else { return request.defaultChoice }
+
+				return await withCheckedContinuation { continuation in
+					handler(request) { continuation.resume(returning: $0) }
+				}
+			},
 														 logger: logger)
+			appleCredential = nil
 		}
 
 		state.framebufferWidth = serverInit.framebufferWidth

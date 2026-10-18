@@ -6,12 +6,18 @@
 // made from the login. The client unwraps them, sends SetEncryption command 2
 // in the clear, and from then on both sides speak in records.
 //
-// When another account is signed in at the console, the Mac sends a
-// session-selection block instead of the rekey. That is not supported yet.
+// Sometimes (the spec's best fit: when nobody is signed in at the console)
+// the Mac sends a session-selection block first. The client answers with
+// "share the console" or "log in to my own session", then the rekey follows.
 //
 // Written from docs/protocols/apple-auth-spec.md sections 6 to 8.
 //
 // ── Change log (newest first) ──────────────────────────────────────────────
+//  v1.1  2026-10-18  Answers the session-selection block (spec 6, approved
+//                    4304071 plus 8f81667): share-console and auto-login
+//                    replies, then a search for the rekey past the Mac's
+//                    reply, whose bytes the spec does not give. Fixed the
+//                    mask offset.
 //  v1.0  2026-10-18  New. ViewerInfo, command 1, rekey parsing, command 2,
 //                    and detection of the session-selection block.
 // ───────────────────────────────────────────────────────────────────────────
@@ -34,21 +40,68 @@ extension VNCProtocol {
 		/// First two bytes of the session-selection block: its own length, 74.
 		private static let sessionSelectionLength: UInt16 = 74
 
-		/// Sends the two cleartext messages, reads the rekey and starts the
-		/// encrypted record layer on the connection.
+		/// Asks the app which session to use when the Mac offers a choice.
+		typealias Chooser = (VNCSessionSelectionRequest) async -> VNCSessionSelectionChoice
+
+		/// How long to wait for the person at the console to approve sharing.
+		static let approvalTimeout: TimeInterval = 90
+
+		/// Sends the two cleartext messages, answers any session selection,
+		/// reads the rekey and starts the encrypted record layer.
 		static func establish(connection: SessionConnection,
 							  wrapKey: [UInt8],
+							  credential: VNCUsernamePasswordCredential,
+							  chooser: Chooser,
 							  logger: VNCLogger? = nil) async throws {
 			try await connection.write(data: Data(viewerInfo + setEncryptionStart))
 
-			let rekey = try await readRekey(connection: connection, logger: logger)
+			var rekey = try await readRekey(connection: connection, logger: logger)
+
+			if case .sessionSelection(let request) = rekey {
+				let choice = await chooser(request)
+
+				logger?.logDebug("Apple session: session selection mask \(request.mask), choice \(choice)")
+
+				let reply: [UInt8]
+
+				switch choice {
+					case .shareConsole where request.canShareConsole:
+						reply = shareConsoleReply(consoleUserName: request.consoleUserName)
+					case .ownSession where request.canUseOwnSession:
+						reply = try ownSessionReply(credential: credential, wrapKey: wrapKey)
+					case .cancel:
+						throw VNCError.authentication(.appleSessionSelectionDeclined)
+					default:
+						throw VNCError.authentication(.appleSessionSelectionRequired)
+				}
+
+				try await connection.write(data: Data(reply))
+
+				// A person may have to approve. Give up after a while.
+				let watchdog = Task {
+					try await Task.sleep(nanoseconds: UInt64(approvalTimeout * 1_000_000_000))
+					connection.cancel()
+				}
+				defer { watchdog.cancel() }
+
+				do {
+					rekey = .rekey(try await searchForRekey(connection: connection, logger: logger))
+				} catch {
+					// The Mac closes the connection to decline.
+					throw VNCError.authentication(.appleSessionSelectionDeclined)
+				}
+			}
+
+			guard case .rekey(let wrapped) = rekey else {
+				throw VNCError.protocol(.invalidData)
+			}
 
 			let codec: AppleRecordCodec
 
 			do {
 				codec = try AppleRecordCodec.fromRekey(wrapKey: wrapKey,
-													   wrappedKey: Array(rekey.prefix(16)),
-													   wrappedVector: Array(rekey.suffix(16)))
+													   wrappedKey: Array(wrapped.prefix(16)),
+													   wrappedVector: Array(wrapped.suffix(16)))
 			} catch {
 				throw VNCError.authentication(.encryptionFailed)
 			}
@@ -61,10 +114,14 @@ extension VNCProtocol {
 			logger?.logDebug("Apple session: encryption on")
 		}
 
-		/// Reads server messages until the rekey arrives. Returns its 32
-		/// wrapped bytes: the key, then the initial vector.
+		private enum FirstReply {
+			case rekey([UInt8])
+			case sessionSelection(VNCSessionSelectionRequest)
+		}
+
+		/// Reads server messages until the rekey or a session-selection block.
 		private static func readRekey(connection: SessionConnection,
-									  logger: VNCLogger?) async throws -> [UInt8] {
+									  logger: VNCLogger?) async throws -> FirstReply {
 			while true {
 				let first = try await connection.readUInt8()
 
@@ -78,15 +135,9 @@ extension VNCProtocol {
 				let second = try await connection.readUInt8()
 
 				if UInt16(first) << 8 | UInt16(second) == sessionSelectionLength {
-					// 2 bytes of version, then a mask of what the Mac offers.
 					let block = [UInt8](try await connection.readBuffered(length: Int(sessionSelectionLength)))
-					let mask = block.count >= 8 ? block[4..<8].reduce(0) { $0 << 8 | Int($1) } : -1
 
-					// The block ends in the console user's name, which is
-					// personal data. It is not logged.
-					logger?.logDebug("Apple session: session selection offered, mask \(mask)")
-
-					throw VNCError.authentication(.appleSessionSelectionRequired)
+					return .sessionSelection(parseSessionSelection(block))
 				}
 
 				// Otherwise a framebuffer update: type 0, one pad byte, a rectangle count.
@@ -105,7 +156,7 @@ extension VNCProtocol {
 						let body = [UInt8](try await connection.readBuffered(length: 36))
 
 						// Four bytes of generation counter, then the wrapped key and vector.
-						return Array(body[4...])
+						return .rekey(Array(body[4...]))
 					}
 
 					guard skippableEncodings.contains(encoding) else {
@@ -117,6 +168,82 @@ extension VNCProtocol {
 					_ = try await connection.readBuffered(length: length)
 				}
 			}
+		}
+
+		/// After a session-selection reply the Mac sends an answer of unknown
+		/// layout, then the rekey. Scan for the rekey rectangle's header: zero
+		/// geometry and encoding 1103.
+		private static func searchForRekey(connection: SessionConnection,
+										   logger: VNCLogger?) async throws -> [UInt8] {
+			let signature: [UInt8] = [0, 0, 0, 0, 0, 0, 0, 0, 0x00, 0x00, 0x04, 0x4F]
+			var window: [UInt8] = []
+			var skipped = 0
+
+			while skipped < 65_536 {
+				window.append(try await connection.readUInt8())
+
+				if window.count > signature.count {
+					window.removeFirst()
+					skipped += 1
+				}
+
+				if window == signature {
+					// What came before the update header (4 bytes) was the Mac's answer.
+					logger?.logDebug("Apple session: \(max(0, skipped - 4)) bytes of session-selection answer before the rekey")
+
+					let body = [UInt8](try await connection.readBuffered(length: 36))
+
+					return Array(body[4...])
+				}
+			}
+
+			throw VNCError.protocol(.invalidData)
+		}
+
+		/// The 74 bytes after the block's own length: version (2), mask (4),
+		/// zero (4), the console user's name (64, NUL-padded).
+		private static func parseSessionSelection(_ block: [UInt8]) -> VNCSessionSelectionRequest {
+			let mask = block[2..<6].reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
+			let nameBytes = block[10..<74].prefix { $0 != 0 }
+
+			return VNCSessionSelectionRequest(canShareConsole: mask & 0x1 != 0,
+											  canUseOwnSession: mask & 0x2 != 0,
+											  consoleUserName: String(decoding: nameBytes, as: UTF8.self),
+											  mask: mask)
+		}
+
+		/// Share-console reply: length 72, version 2, four zeros, command 0,
+		/// a zero, then the console user's name, NUL-padded.
+		private static func shareConsoleReply(consoleUserName: String) -> [UInt8] {
+			var body: [UInt8] = [0x00, 0x02, 0, 0, 0, 0, 0x00, 0x00]
+			body += Array(Array(consoleUserName.utf8).prefix(63))
+			body += [UInt8](repeating: 0, count: 72 - body.count)
+
+			return [0x00, 72] + body
+		}
+
+		/// Auto-login reply: length 200, version 2, four zeros, command 2, a
+		/// zero, 64 zeros, then the account name and the password, each padded
+		/// to 64 bytes and encrypted with AES-128-ECB under the wrap key.
+		private static func ownSessionReply(credential: VNCUsernamePasswordCredential,
+											wrapKey: [UInt8]) throws -> [UInt8] {
+			func sealed(_ text: String) throws -> [UInt8] {
+				var field = Array(Array(text.utf8).prefix(63))
+				field += [UInt8](repeating: 0, count: 64 - field.count)
+
+				guard let encrypted = Data(field).aes128ECBEncrypted(withKey: Data(wrapKey)) else {
+					throw VNCError.authentication(.encryptionFailed)
+				}
+
+				return [UInt8](encrypted)
+			}
+
+			var body: [UInt8] = [0x00, 0x02, 0, 0, 0, 0, 0x02, 0x00]
+			body += [UInt8](repeating: 0, count: 64)
+			body += try sealed(credential.username)
+			body += try sealed(credential.password)
+
+			return [0x00, 200] + body
 		}
 
 		// MARK: Cleartext messages

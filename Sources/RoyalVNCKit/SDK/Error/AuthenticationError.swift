@@ -1,6 +1,8 @@
 // Authentication errors.
 //
 // ── Change log (newest first, robotarmy-corp fork) ─────────────────────────
+//  v1.2  2026-10-18  appleSessionSelectionDeclined: the person at the console
+//                    said no, did not answer, or the app cancelled.
 //  v1.1  2026-10-18  Cases for Apple's SRP login (types 33 and 36): wrong
 //                    password, a correct password the Mac still refuses, a
 //                    server proof that does not check out, and the session
@@ -27,6 +29,7 @@ public extension VNCError {
 		case appleLoginRefused
 		case appleServerProofInvalid
 		case appleSessionSelectionRequired
+		case appleSessionSelectionDeclined
 
 		// MARK: - LocalizedError
 		public var errorDescription: String? {
@@ -55,7 +58,9 @@ public extension VNCError {
 				case .appleServerProofInvalid:
 					return "The Mac's answer did not prove it knows the password. Not connecting."
 				case .appleSessionSelectionRequired:
-					return "Another account is signed in at the Mac. Choosing a session is not supported yet."
+					return "The Mac asked how to share the screen, and offered nothing this app can choose."
+				case .appleSessionSelectionDeclined:
+					return "Screen sharing was declined, or nobody approved it in time."
 			}
 		}
 	}

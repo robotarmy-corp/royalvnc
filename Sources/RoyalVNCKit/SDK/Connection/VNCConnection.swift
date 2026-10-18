@@ -1,6 +1,8 @@
 // The connection object: settings, state, handshake entry point.
 //
 // ── Change log (newest first, robotarmy-corp fork) ─────────────────────────
+//  v1.2  2026-10-18  sessionSelectionHandler: the app's answer when a Mac
+//                    offers "share the console" or "own session".
 //  v1.1  2026-10-18  `connection` is now a SessionConnection, a pass-through
 //                    wrapper that can switch on Apple's encrypted records
 //                    (login types 33 and 36).
@@ -35,6 +37,11 @@ public final class VNCConnection: NSObjectOrAnyObject {
 	@objc
 #endif
 	public weak var delegate: VNCConnectionDelegate?
+
+	/// Called when a Mac, after an Apple login, asks whether to share the
+	/// console user's screen or open the account's own session. Nil means the
+	/// library chooses: own session if offered, else asking to share.
+	public var sessionSelectionHandler: VNCSessionSelectionHandler?
 
 #if canImport(ObjectiveC)
 	@objc
@@ -78,6 +85,10 @@ public final class VNCConnection: NSObjectOrAnyObject {
 	var clientToServerMessageQueue = Queue<VNCSendableMessage>()
 
     var mouseButtonState: VNCProtocol.MousePointerButton = [ ]
+
+	/// The Apple login, kept from the login until the session is set up, in
+	/// case the Mac asks for it again to open the account's own session.
+	var appleCredential: VNCUsernamePasswordCredential?
 
     lazy var connection: SessionConnection = {
         let connectionSettings = NetworkConnectionSettings(connectionTimeout: 15,
