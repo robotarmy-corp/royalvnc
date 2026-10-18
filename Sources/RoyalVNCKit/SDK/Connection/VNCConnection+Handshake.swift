@@ -1,3 +1,11 @@
+// The RFB handshake: version, security type choice, authentication.
+//
+// ── Change log (newest first, robotarmy-corp fork) ─────────────────────────
+//  v1.1  2026-10-17  decideSecurityType honours settings.preferredSecurityTypes
+//                    before falling back to the built-in order.
+//  v1.0  (upstream)  As inherited from royalapplications/royalvnc 2026-09-21.
+// ───────────────────────────────────────────────────────────────────────────
+
 #if canImport(FoundationEssentials)
 import FoundationEssentials
 #else
@@ -103,7 +111,19 @@ private extension VNCConnection {
 
 		let supportedSecurityTypes = supportedTypes.securityTypes
 
-		if supportedSecurityTypes.contains(.none) {
+		// The types this library can actually authenticate with.
+		let implemented: [VNCProtocol.SecurityType] = [.none, .diffieHellman, .ultraVNCMSLogonII, .vnc, .tight]
+
+		let preferred = settings.preferredSecurityTypes
+			.compactMap { VNCProtocol.SecurityType(rawValue: $0) }
+			.first { supportedSecurityTypes.contains($0) && implemented.contains($0) }
+
+		if let preferred {
+			chosenSecurityType = preferred
+		} else if !settings.preferredSecurityTypes.isEmpty {
+			// The caller asked for specific types and the server offers none of them.
+			throw VNCError.authentication(.clientCouldNotDecideOnSecurityType)
+		} else if supportedSecurityTypes.contains(.none) {
 			chosenSecurityType = .none
 		} else if supportedSecurityTypes.contains(.diffieHellman) {
 			chosenSecurityType = .diffieHellman

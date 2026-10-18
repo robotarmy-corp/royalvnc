@@ -1,3 +1,12 @@
+// Connection settings for a VNCConnection.
+//
+// ── Change log (newest first, robotarmy-corp fork) ─────────────────────────
+//  v1.1  2026-10-17  preferredSecurityTypes: lets the app pick the login
+//                    method (e.g. VNC password vs Mac account) instead of the
+//                    library's fixed order. Empty keeps the old behaviour.
+//  v1.0  (upstream)  As inherited from royalapplications/royalvnc 2026-09-21.
+// ───────────────────────────────────────────────────────────────────────────
+
 #if canImport(FoundationEssentials)
 import FoundationEssentials
 #else
@@ -55,6 +64,10 @@ public extension VNCConnection {
 		public let colorDepth: ColorDepth
 
 		public let frameEncodings: [VNCFrameEncodingType]
+
+		/// RFB security type numbers to try, in order. The first one the server
+		/// offers and this library supports is used. Empty means the default order.
+		public var preferredSecurityTypes: [UInt8] = []
 
 #if canImport(ObjectiveC)
 		@objc(frameEncodings)
