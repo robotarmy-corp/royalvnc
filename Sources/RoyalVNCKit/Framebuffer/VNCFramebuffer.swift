@@ -1,3 +1,11 @@
+// The framebuffer: the remote screen's pixels, kept in local memory.
+//
+// ── Change log (newest first, robotarmy-corp fork) ─────────────────────────
+//  v1.1  2026-10-24  ioSurface is public, so an app can hand the surface to a
+//                    layer and skip copying 4K frames.
+//  v1.0  (upstream)  As inherited from royalapplications/royalvnc 2026-09-21.
+// ───────────────────────────────────────────────────────────────────────────
+
 #if canImport(FoundationEssentials)
 import FoundationEssentials
 #else
@@ -86,7 +94,9 @@ public final class VNCFramebuffer: NSObjectOrAnyObject {
 	let needsColorConversion: Bool
     
 #if canImport(IOSurface) && canImport(CoreVideo)
-    var ioSurface: IOSurface? {
+    /// The shared surface holding the pixels, when the default allocator is
+    /// used. Lets an app show the framebuffer without copying it.
+    public var ioSurface: IOSurface? {
         guard let surfaceAllocator = allocator as? VNCFramebufferIOSurfaceAllocator else {
             return nil
         }
