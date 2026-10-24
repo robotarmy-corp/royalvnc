@@ -1,3 +1,11 @@
+// Clipboard redirection: watching the local pasteboard and sending changes.
+//
+// ── Change log (newest first, robotarmy-corp fork) ─────────────────────────
+//  v1.1  2026-10-24  No local pasteboard watching when
+//                    settings.isClipboardMonitoringEnabled is false.
+//  v1.0  (upstream)  As inherited from royalapplications/royalvnc 2026-09-21.
+// ───────────────────────────────────────────────────────────────────────────
+
 #if canImport(FoundationEssentials)
 import FoundationEssentials
 #else
@@ -6,7 +14,8 @@ import Foundation
 
 extension VNCConnection {
 	func startMonitoringClipboard() {
-		guard settings.isClipboardRedirectionEnabled else { return }
+		guard settings.isClipboardRedirectionEnabled,
+			  settings.isClipboardMonitoringEnabled else { return }
 
 		clipboardMonitor.startMonitoring()
 	}

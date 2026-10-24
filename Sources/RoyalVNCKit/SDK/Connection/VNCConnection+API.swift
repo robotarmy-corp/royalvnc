@@ -1,8 +1,28 @@
+// The public API for driving a connection: connect, input, clipboard.
+//
+// ── Change log (newest first, robotarmy-corp fork) ─────────────────────────
+//  v1.1  2026-10-24  sendClipboardText: puts text on the remote clipboard,
+//                    for apps that do not watch the local pasteboard.
+//  v1.0  (upstream)  As inherited from royalapplications/royalvnc 2026-09-21.
+// ───────────────────────────────────────────────────────────────────────────
+
 #if canImport(FoundationEssentials)
 import FoundationEssentials
 #else
 import Foundation
 #endif
+
+// MARK: - Clipboard
+public extension VNCConnection {
+	/// Sends text to the remote clipboard. Works whether or not the local
+	/// pasteboard is being watched.
+#if canImport(ObjectiveC)
+	@objc
+#endif
+	func sendClipboardText(_ text: String) {
+		enqueueClientCutTextMessage(text)
+	}
+}
 
 // MARK: - Connect/Disconnect
 public extension VNCConnection {

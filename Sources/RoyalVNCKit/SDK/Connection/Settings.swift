@@ -1,6 +1,10 @@
 // Connection settings for a VNCConnection.
 //
 // ── Change log (newest first, robotarmy-corp fork) ─────────────────────────
+//  v1.4  2026-10-24  isClipboardMonitoringEnabled: when false, Mac clipboard text
+//                    still arrives, but the local pasteboard is not polled or
+//                    sent. On iOS, polling another app's copied text prompts
+//                    the user every time. Default true keeps the old behaviour.
 //  v1.3  2026-10-24  appleSessionSelection applies only to types 33 and 36.
 //  v1.2  2026-10-18  appleSessionSelection: opt in to the Mac's "share the
 //                    console or open your own session" question. Off by
@@ -81,6 +85,11 @@ public extension VNCConnection {
 		/// for itself, which on mm2018 meant the account's own session.
 		/// Takes effect only when the first preferred security type is 33 or 36.
 		public var appleSessionSelection = false
+
+		/// When clipboard redirection is on: also watch the local pasteboard
+		/// and send its changes. Set false on iOS, where reading another app's
+		/// copied text asks the user; send text with sendClipboardText instead.
+		public var isClipboardMonitoringEnabled = true
 
 #if canImport(ObjectiveC)
 		@objc(frameEncodings)
