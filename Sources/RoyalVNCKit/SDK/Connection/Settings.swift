@@ -1,6 +1,7 @@
 // Connection settings for a VNCConnection.
 //
 // ── Change log (newest first, robotarmy-corp fork) ─────────────────────────
+//  v1.3  2026-10-24  appleSessionSelection applies only to types 33 and 36.
 //  v1.2  2026-10-18  appleSessionSelection: opt in to the Mac's "share the
 //                    console or open your own session" question. Off by
 //                    default, because the own-session answer opens a session
@@ -78,6 +79,7 @@ public extension VNCConnection {
 		/// user's screen or open a session of the login account's own (see
 		/// VNCConnection.sessionSelectionHandler). When false, the Mac picks
 		/// for itself, which on mm2018 meant the account's own session.
+		/// Takes effect only when the first preferred security type is 33 or 36.
 		public var appleSessionSelection = false
 
 #if canImport(ObjectiveC)

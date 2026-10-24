@@ -1,6 +1,11 @@
 // The RFB handshake: version, security type choice, authentication.
 //
 // ── Change log (newest first, robotarmy-corp fork) ─────────────────────────
+//  v1.5  2026-10-24  No failure-reason read after a failed SecurityResult on
+//                    "RFB 003.889". The Mac sends none, and a wrong type 30
+//                    password hung until the socket died. Apple's banner is
+//                    used only when the first preferred type is 33 or 36:
+//                    type 30 under it got a black screen.
 //  v1.4  2026-10-18  With settings.appleSessionSelection, answers an Apple
 //                    server's "RFB 003.889" with the same banner (spec 1). Live on mm2018,
 //                    a 3.8 answer kept the Mac from offering session
@@ -55,7 +60,11 @@ private extension VNCConnection {
 			let maxSupportedProtocolVersion = maxSupportedProtocolVersion
 
 			// The max. protocol version we currently support is 3.8, so check if the server is within those limits, otherwise downgrade to 3.8
-			if serverProtocolVersion.isAppleRemoteDesktop, settings.appleSessionSelection {
+			// Session selection is only handled for types 33 and 36, so only
+			// use Apple's banner when one of those is the first choice.
+			let firstChoiceIsAppleSRP = settings.preferredSecurityTypes.first.map { $0 == 33 || $0 == 36 } ?? false
+
+			if serverProtocolVersion.isAppleRemoteDesktop, settings.appleSessionSelection, firstChoiceIsAppleSRP {
 				// Apple's Screen Sharing: echo its banner. Apple's extensions,
 				// session selection among them, depend on it.
 				clientProtocolVersion = serverProtocolVersion
@@ -288,9 +297,11 @@ private extension VNCConnection {
 		guard actualResult == .ok else {
 			let reason: String?
 
-			// Only servers 3.8+ send a reason
+			// Only servers 3.8+ send a reason. An Apple Mac on "RFB 003.889"
+			// sends none, so reading one would hang (seen on mm2018).
 			if let protocolVersion = state.agreedProtocolVersion,
-			   protocolVersion.is3Point8OrHigher {
+			   protocolVersion.is3Point8OrHigher,
+			   !protocolVersion.isAppleRemoteDesktop {
 				reason = try? await VNCProtocol.SecurityResult.receiveFailureReason(connection: connection)
 			} else {
 				reason = nil
