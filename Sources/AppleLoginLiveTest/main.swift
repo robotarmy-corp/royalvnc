@@ -13,7 +13,8 @@
 //   LIVE_EXPECT    "fail" when a failed login is the expected result
 //   LIVE_LOGOUT    if set, logs the account out: Shift-Command-Q after 2 s,
 //                  Return after 5 s. Use only with throwaway accounts.
-//   LIVE_CLICK     "x,y" in framebuffer pixels: one left click after 2 s
+//   LIVE_CLICK     "x,y" in framebuffer pixels: one click after 2 s
+//   LIVE_BUTTON    left (default), middle or right, for LIVE_CLICK
 //   LIVE_CHOICE    turns on session selection, and is the answer to the question: cancel, share,
 //                  own, or default (the library's pick). Default: default.
 //   LIVE_SNAPSHOT  path of a PNG to write with the last frame, quarter size
@@ -23,6 +24,8 @@
 // credentials and no console user's name.
 //
 // ── Change log (newest first) ──────────────────────────────────────────────
+//  v1.7  2026-10-24  LIVE_BUTTON picks the button for LIVE_CLICK, to check
+//                    right clicks in Apple sessions.
 //  v1.6  2026-10-18  LIVE_CHOICE also turns on settings.appleSessionSelection.
 //  v1.5  2026-10-18  LIVE_CHOICE answers a session-selection question and
 //                    prints what the Mac offered. LIVE_DEBUG prints the
@@ -168,8 +171,10 @@ while Date() < deadline, !delegate.finished {
 		if let click, click.count == 2, !clicked, elapsed >= 2 {
 			clicked = true
 			connection.mouseMove(x: click[0], y: click[1])
-			connection.mouseButtonDown(.left, x: click[0], y: click[1])
-			connection.mouseButtonUp(.left, x: click[0], y: click[1])
+			let button: VNCMouseButton = environment["LIVE_BUTTON"] == "right" ? .right
+				: environment["LIVE_BUTTON"] == "middle" ? .middle : .left
+			connection.mouseButtonDown(button, x: click[0], y: click[1])
+			connection.mouseButtonUp(button, x: click[0], y: click[1])
 			print("clicked \(click[0]),\(click[1])")
 		}
 
