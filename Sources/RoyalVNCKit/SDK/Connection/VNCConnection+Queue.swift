@@ -1,3 +1,14 @@
+// The client-to-server message queue: key, pointer and clipboard events.
+//
+// ── Change log (newest first, robotarmy-corp fork) ─────────────────────────
+//  v1.1  2026-10-24  On Apple's "RFB 003.889" banner, swaps the middle and
+//                    right buttons in pointer events. Live on mm2018, under
+//                    that banner mask 0x02 opened the context menu and 0x04
+//                    acted as a middle click; under 3.8 the numbering is
+//                    standard. Callers keep using .right for right.
+//  v1.0  (upstream)  As inherited from royalapplications/royalvnc 2026-09-21.
+// ───────────────────────────────────────────────────────────────────────────
+
 #if canImport(FoundationEssentials)
 import FoundationEssentials
 #else
@@ -52,7 +63,17 @@ extension VNCConnection {
 						   position: VNCProtocol.MousePosition) {
 		guard settings.inputMode != .none else { return }
 
-		let pointerEvent = VNCProtocol.PointerEvent(buttons: buttons,
+		var wireButtons = buttons
+
+		// Apple's own protocol numbers buttons the macOS way: 2 is right, 3 is other.
+		if state.agreedProtocolVersion?.isAppleRemoteDesktop == true {
+			let middle = buttons.contains(.middle), right = buttons.contains(.right)
+			wireButtons.remove([.middle, .right])
+			if middle { wireButtons.insert(.right) }
+			if right { wireButtons.insert(.middle) }
+		}
+
+		let pointerEvent = VNCProtocol.PointerEvent(buttons: wireButtons,
 													position: position)
 
 		enqueueClientToServerMessage(pointerEvent)
