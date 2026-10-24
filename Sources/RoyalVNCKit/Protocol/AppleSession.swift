@@ -13,6 +13,9 @@
 // Written from docs/protocols/apple-auth-spec.md sections 6 to 8.
 //
 // ── Change log (newest first) ──────────────────────────────────────────────
+//  v1.5  2026-10-24  Sends SetDisplayConfiguration (spec 9a) after the key
+//                    switch when asked. Under the 3.889 banner a sole
+//                    viewer otherwise gets one black frame.
 //  v1.4  2026-10-24  Uses the trimmed account name in both replies.
 //  v1.3  2026-10-18  Share-console, live on mm2018: approval worked, but
 //                    unknown bytes came before the rekey, so the client now
@@ -64,6 +67,7 @@ extension VNCProtocol {
 							  credential: VNCUsernamePasswordCredential,
 							  chooser: Chooser,
 							  selectionExpected: Bool = false,
+							  displaySize: (width: UInt16, height: UInt16)? = nil,
 							  logger: VNCLogger? = nil) async throws {
 			if selectionExpected {
 				// The block comes straight after ServerInit, and the Mac reads
@@ -125,6 +129,51 @@ extension VNCProtocol {
 			connection.enableEncryption(codec)
 
 			logger?.logDebug("Apple session: encryption on")
+
+			if let displaySize {
+				// Under the 3.889 banner the Mac starts screen capture only once
+				// told which display to share (spec 9a). First record, before
+				// SetEncodings.
+				try await connection.write(data: Data(displayConfiguration(width: displaySize.width,
+																		   height: displaySize.height)))
+
+				logger?.logDebug("Apple session: display configuration sent, \(displaySize.width)x\(displaySize.height)")
+			}
+		}
+
+		/// SetDisplayConfiguration (0x1d), spec 9a: one plain display (type 0,
+		/// fixed resolution) with one mode at the screen's own size.
+		static func displayConfiguration(width: UInt16, height: UInt16) -> [UInt8] {
+			func be16(_ v: UInt16) -> [UInt8] { [UInt8(v >> 8), UInt8(v & 0xFF)] }
+			func float32(_ v: Float) -> [UInt8] { be32(v.bitPattern) }
+			func float64(_ v: Double) -> [UInt8] {
+				let bits = v.bitPattern
+				return (0..<8).map { UInt8((bits >> (56 - 8 * UInt64($0))) & 0xFF) }
+			}
+
+			let w = UInt32(width), h = UInt32(height)
+
+			var mode = be32(w) + be32(h) + be32(w) + be32(h) // size, scaled size
+			mode += float64(60.0) // refresh rate
+			mode += be32(0) // flags (bit 0: HDR)
+
+			var descriptor = be16(UInt16(0x9C + mode.count)) // descriptor size
+			var name = Array("Extraordinary VNC".utf8)
+			name += [UInt8](repeating: 0, count: 120 - name.count) // name and opaque region
+			descriptor += name
+			descriptor += be32(0) // display flags: fixed resolution
+			descriptor += be32(0) // display type: plain session
+			descriptor += float32(600) + float32(340) // physical size, millimetres
+			descriptor += be32(w) + be32(h) // maximum size
+			descriptor += be16(0) + be16(0) // current and preferred mode index
+			descriptor += be32(0) // rotation
+			descriptor += be16(1) // mode count
+			descriptor += mode
+
+			var body: [UInt8] = be16(1) + be16(1) + be32(0) // version, display count, flags
+			body += descriptor
+
+			return [0x1D, 0x00] + be16(UInt16(body.count)) + body
 		}
 
 		/// Asks the app, sends the matching reply, and waits for the Mac's

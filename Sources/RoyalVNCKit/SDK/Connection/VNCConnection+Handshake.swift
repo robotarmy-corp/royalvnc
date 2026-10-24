@@ -1,6 +1,8 @@
 // The RFB handshake: version, security type choice, authentication.
 //
 // ── Change log (newest first, robotarmy-corp fork) ─────────────────────────
+//  v1.6  2026-10-24  Under the 3.889 banner, asks the session setup to send
+//                    the display configuration, sized from ServerInit.
 //  v1.5  2026-10-24  No failure-reason read after a failed SecurityResult on
 //                    "RFB 003.889". The Mac sends none, and a wrong type 30
 //                    password hung until the socket died. Apple's banner is
@@ -366,6 +368,8 @@ private extension VNCConnection {
 				}
 			},
 														 selectionExpected: selectionExpected,
+														 displaySize: state.agreedProtocolVersion?.isAppleRemoteDesktop == true
+															 ? (serverInit.framebufferWidth, serverInit.framebufferHeight) : nil,
 														 logger: logger)
 			appleCredential = nil
 		}

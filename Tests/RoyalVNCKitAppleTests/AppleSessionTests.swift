@@ -6,6 +6,7 @@
 // script sends a few arbitrary bytes there, which the client must skip.
 //
 // ── Change log (newest first) ──────────────────────────────────────────────
+//  v1.3  2026-10-24  SetDisplayConfiguration layout.
 //  v1.2  2026-10-18  Share-console sends the requester's name; unknown bytes
 //                    before the rekey after a selection are skipped.
 //  v1.1  2026-10-18  The block answered before ViewerInfo when ServerInit
@@ -197,6 +198,33 @@ final class AppleSessionTests: XCTestCase {
 		}
 
 		_ = try await establish(socket: socket, selectionExpected: true) { _ in .shareConsole }
+	}
+
+	/// SetDisplayConfiguration against the offsets in spec section 9a.
+	func testDisplayConfigurationLayout() {
+		let m = VNCProtocol.AppleSession.displayConfiguration(width: 3840, height: 2160)
+		func u16(_ o: Int) -> Int { Int(m[o]) << 8 | Int(m[o + 1]) }
+		func u32(_ o: Int) -> Int { Int(m[o]) << 24 | Int(m[o + 1]) << 16 | Int(m[o + 2]) << 8 | Int(m[o + 3]) }
+
+		XCTAssertEqual(Array(m.prefix(2)), [0x1D, 0])
+		XCTAssertEqual(u16(2), m.count - 4) // message size
+		XCTAssertEqual(u16(4), 1) // version
+		XCTAssertEqual(u16(6), 1) // display count
+		XCTAssertEqual(u32(8), 0) // flags
+
+		let d = 12 // descriptor start
+		XCTAssertEqual(u16(d), 0x9C + 28) // descriptor size with one mode
+		XCTAssertEqual(m.count, d + 0x9C + 28)
+		XCTAssertEqual(u32(d + 0x7A), 0) // display flags
+		XCTAssertEqual(u32(d + 0x7E), 0) // display type: plain
+		XCTAssertEqual(u32(d + 0x8A), 3840) // max width
+		XCTAssertEqual(u32(d + 0x8E), 2160) // max height
+		XCTAssertEqual(u16(d + 0x92), 0) // current mode
+		XCTAssertEqual(u16(d + 0x94), 0) // preferred mode
+		XCTAssertEqual(u32(d + 0x96), 0) // rotation
+		XCTAssertEqual(u16(d + 0x9A), 1) // mode count
+		XCTAssertEqual([u32(d + 156), u32(d + 160), u32(d + 164), u32(d + 168)], [3840, 2160, 3840, 2160])
+		XCTAssertEqual(Array(m[(d + 172)..<(d + 180)]), [0x40, 0x4E, 0, 0, 0, 0, 0, 0]) // 60.0 as a double
 	}
 
 	func testCancelAndUnofferedChoice() async throws {
