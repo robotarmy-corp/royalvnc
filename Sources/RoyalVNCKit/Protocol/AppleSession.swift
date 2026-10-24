@@ -13,6 +13,7 @@
 // Written from docs/protocols/apple-auth-spec.md sections 6 to 8.
 //
 // ── Change log (newest first) ──────────────────────────────────────────────
+//  v1.4  2026-10-24  Uses the trimmed account name in both replies.
 //  v1.3  2026-10-18  Share-console, live on mm2018: approval worked, but
 //                    unknown bytes came before the rekey, so the client now
 //                    scans for the rekey after a selection. The reply's name
@@ -144,7 +145,7 @@ extension VNCProtocol {
 				case .shareConsole where request.canShareConsole:
 					// The Mac shows this name to the person at the console as
 					// the one asking (seen on mm2018), so send the login account.
-					reply = shareConsoleReply(requesterName: credential.username)
+					reply = shareConsoleReply(requesterName: credential.appleAccountName)
 				case .ownSession where request.canUseOwnSession:
 					reply = try ownSessionReply(credential: credential, wrapKey: wrapKey)
 				case .cancel:
@@ -304,7 +305,7 @@ extension VNCProtocol {
 
 			var body: [UInt8] = [0x00, 0x02, 0, 0, 0, 0, 0x02, 0x00]
 			body += [UInt8](repeating: 0, count: 64)
-			body += try sealed(credential.username)
+			body += try sealed(credential.appleAccountName)
 			body += try sealed(credential.password)
 
 			return [0x00, 200] + body

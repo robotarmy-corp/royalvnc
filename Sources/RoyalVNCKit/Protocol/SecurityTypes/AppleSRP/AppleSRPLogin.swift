@@ -7,6 +7,9 @@
 // Written from docs/protocols/apple-auth-spec.md sections 3 and 5.
 //
 // ── Change log (newest first) ──────────────────────────────────────────────
+//  v1.1  2026-10-24  Trims white space from the user name. A trailing space,
+//                    which iOS adds after a keyboard suggestion, made a
+//                    correct login fail as a wrong password.
 //  v1.0  2026-10-18  New. Both login types, the server proof check, and the
 //                    SecurityResult. Sends the selector byte in the same
 //                    write as the first message, as the spec requires.
@@ -58,7 +61,7 @@ extension VNCProtocol.AppleSRPAuthentication {
 	func perform(connection: NetworkConnectionReading & NetworkConnectionWriting,
 				 credential: VNCUsernamePasswordCredential,
 				 logger: VNCLogger? = nil) async throws -> Outcome {
-		let username = Array(credential.username.utf8)
+		let username = Array(credential.appleAccountName.utf8)
 
 		let challengeBlock: [UInt8]
 
@@ -279,6 +282,22 @@ private extension VNCProtocol.AppleSRPAuthentication {
 		}
 
 		return proof
+	}
+}
+
+// MARK: - Account name
+extension VNCUsernamePasswordCredential {
+	/// The user name with leading and trailing white space removed. iOS adds
+	/// a space after a tapped keyboard suggestion, and the Mac then refuses
+	/// the login as a wrong password (seen on mm2018, 2026-10-24). Mac account
+	/// names never start or end with a space. The password is never trimmed.
+	var appleAccountName: String {
+		var characters = Substring(username)
+
+		while characters.first?.isWhitespace == true { characters.removeFirst() }
+		while characters.last?.isWhitespace == true { characters.removeLast() }
+
+		return String(characters)
 	}
 }
 

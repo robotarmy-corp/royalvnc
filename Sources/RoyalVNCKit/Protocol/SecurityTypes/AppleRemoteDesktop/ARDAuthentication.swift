@@ -1,3 +1,12 @@
+// Apple Remote Desktop login, RFB security type 30 (Diffie-Hellman).
+//
+// ── Change log (newest first, robotarmy-corp fork) ─────────────────────────
+//  v1.1  2026-10-24  Trims white space from the user name, as types 33 and
+//                    36 do. A trailing space from an iOS keyboard suggestion
+//                    made a correct login fail.
+//  v1.0  (upstream)  As inherited from royalapplications/royalvnc 2026-09-21.
+// ───────────────────────────────────────────────────────────────────────────
+
 #if canImport(FoundationEssentials)
 import FoundationEssentials
 #else
@@ -86,7 +95,7 @@ private extension VNCProtocol.ARDAuthentication {
 		}
 
 		guard let authentication = Authentication(agreement: agreement,
-												  username: credential.username,
+												  username: credential.appleAccountName,
 												  password: credential.password),
 			  !authentication.publicKey.isEmpty,
 			  !authentication.cipherText.isEmpty else {

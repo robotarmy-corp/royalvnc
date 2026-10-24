@@ -6,6 +6,7 @@
 // Mac agrees: the live test (AppleLoginLiveTest) does that.
 //
 // ── Change log (newest first) ──────────────────────────────────────────────
+//  v1.2  2026-10-24  User name trimmed before it reaches the Mac.
 //  v1.1  2026-10-18  Mid-session rekey keeps both ends in step.
 //  v1.0  2026-10-18  New. PBKDF2 vectors, RSA against the system, SRP round
 //                    trip, both login framings with good, bad and refused
@@ -307,6 +308,15 @@ final class AppleSRPLoginTests: XCTestCase {
 	}
 
 	func testType33Login() async throws { try await assertLogin(.rsaWrapped) }
+
+	/// iOS adds a space after a keyboard suggestion. The Mac must get the bare name.
+	func testUserNameIsTrimmed() async throws {
+		let mac = try ScriptedMac(variant: .cleartext, password: "pw")
+		let credential = VNCUsernamePasswordCredential(username: " tést \n", password: "pw")
+		_ = try await VNCProtocol.AppleSRPAuthentication(variant: .cleartext)
+			.perform(connection: ScriptedConnection(mac: mac), credential: credential)
+		XCTAssertEqual(mac.receivedUsername, "tést")
+	}
 	func testType36Login() async throws { try await assertLogin(.cleartext) }
 
 	func testWrongPasswordIsReportedAsLoginFailed() async throws {
