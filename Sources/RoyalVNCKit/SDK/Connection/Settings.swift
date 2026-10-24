@@ -5,6 +5,9 @@
 //                    still arrives, but the local pasteboard is not polled or
 //                    sent. On iOS, polling another app's copied text prompts
 //                    the user every time. Default true keeps the old behaviour.
+//  v1.6  2026-10-24  The black-picture warning is back: the display
+//                    configuration is no longer sent (it builds a virtual
+//                    display on the Mac).
 //  v1.5  2026-10-24  The black-picture warning is gone: the library now sends
 //                    the display configuration. Notes own-session's display.
 //  v1.4  2026-10-24  Warns that appleSessionSelection gives a black picture
@@ -88,11 +91,11 @@ public extension VNCConnection {
 		/// VNCConnection.sessionSelectionHandler). When false, the Mac picks
 		/// for itself, which on mm2018 meant the account's own session.
 		/// Takes effect only when the first preferred security type is 33 or 36.
-		/// Under Apple's banner the Mac starts screen capture only once the viewer
-		/// says which display to share; the library sends that for you (spec 9a).
-		/// Choosing "own session" makes the Mac add a virtual display for it,
-		/// which the console user then sees as extra desktop space until that
-		/// session logs out (mm2018, 2026-10-24).
+		/// Warning: under Apple's banner, a viewer that is alone on the Mac gets
+		/// a black picture: the Mac waits to be told which display to share.
+		/// The display-configuration message (spec 9a) starts capture, but it
+		/// makes the Mac create a virtual display and rearrange its own, so the
+		/// library doesn't send it (mm2018, 2026-10-24).
 		public var appleSessionSelection = false
 
 		/// When clipboard redirection is on: also watch the local pasteboard

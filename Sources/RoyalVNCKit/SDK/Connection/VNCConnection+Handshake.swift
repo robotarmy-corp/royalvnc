@@ -1,6 +1,9 @@
 // The RFB handshake: version, security type choice, authentication.
 //
 // ── Change log (newest first, robotarmy-corp fork) ─────────────────────────
+//  v1.7  2026-10-24  Stops sending the display configuration again. Live on
+//                    mm2018 it made the Mac create a virtual display and
+//                    reconfigure its own; the picture switched to it.
 //  v1.6  2026-10-24  Under the 3.889 banner, asks the session setup to send
 //                    the display configuration, sized from ServerInit.
 //  v1.5  2026-10-24  No failure-reason read after a failed SecurityResult on
@@ -368,8 +371,9 @@ private extension VNCConnection {
 				}
 			},
 														 selectionExpected: selectionExpected,
-														 displaySize: state.agreedProtocolVersion?.isAppleRemoteDesktop == true
-															 ? (serverInit.framebufferWidth, serverInit.framebufferHeight) : nil,
+														 // Not sent: on mm2018 SetDisplayConfiguration made the Mac
+														 // build a virtual display and rearrange its own displays.
+														 displaySize: nil,
 														 logger: logger)
 			appleCredential = nil
 		}
