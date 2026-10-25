@@ -1,6 +1,8 @@
 // The connection object: settings, state, handshake entry point.
 //
 // ── Change log (newest first, robotarmy-corp fork) ─────────────────────────
+//  v1.4  2026-10-25  desktopName is public, so an app can label a server
+//                    it reached by address with the server's own name.
 //  v1.3  2026-10-18  Parses Apple's mid-session rekey (1103) and skips its
 //                    1010 and 1011 rectangles.
 //  v1.2  2026-10-18  sessionSelectionHandler: the app's answer when a Mac
@@ -49,6 +51,14 @@ public final class VNCConnection: NSObjectOrAnyObject {
 	@objc
 #endif
 	public var framebuffer: VNCFramebuffer?
+
+	/// The name the server gave its desktop: from ServerInit, or a later
+	/// DesktopName update. Nil until the handshake finishes. Macs send their
+	/// computer name.
+#if canImport(ObjectiveC)
+	@objc
+#endif
+	public var desktopName: String? { state.desktopName }
 
 #if canImport(ObjectiveC)
 	@objc
